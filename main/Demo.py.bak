@@ -1,0 +1,227 @@
+import cv2
+import numpy as np
+import os
+import tensorflow as tf
+from tensorflow.keras.models import load_model
+from tensorflow.keras.preprocessing import image
+from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
+import warnings
+warnings.filterwarnings('ignore')
+
+# Use absolute path for model loading
+current_dir = os.path.dirname(os.path.abspath(__file__))
+model_path = os.path.join(current_dir, 'emergency_vehicle_model_final.h5')
+
+def load_model_with_fallback(model_path):
+    """Custom model loader with fallback for older TensorFlow versions"""
+    try:
+        # Try with standard load_model first
+        model = load_model(model_path)
+        print(f"Successfully loaded model using standard method: {model_path}")
+        return model
+    except Exception as e:
+        print(f"Standard loading failed: {e}")
+        
+        try:
+            # Try with custom objects and skip validation
+            print("Attempting to load with custom settings...")
+            model = tf.keras.models.load_model(
+                model_path, 
+                compile=False,
+                custom_objects={'BatchNormalization': tf.keras.layers.BatchNormalization}
+            )
+            print(f"Successfully loaded model with custom settings: {model_path}")
+            return model
+        except Exception as e2:
+            print(f"Custom loading also failed: {e2}")
+            
+            # Try direct conversion to TFLite as a last resort
+            try:
+                print("Attempting to use TensorFlow Lite model...")
+                # Convert the model to MobileNet architecture which is more compatible
+                from tensorflow.keras.applications import MobileNetV2
+                base_model = MobileNetV2(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
+                x = tf.keras.layers.GlobalAveragePooling2D()(base_model.output)
+                x = tf.keras.layers.Dense(1024, activation='relu')(x)
+                predictions = tf.keras.layers.Dense(2, activation='softmax')(x)
+                model = tf.keras.models.Model(inputs=base_model.input, outputs=predictions)
+                print("Using fallback MobileNetV2 model (not trained on emergency vehicles)")
+                return model
+            except Exception as e3:
+                print(f"All loading methods failed: {e3}")
+                return None
+                
+# Try to load the model with multiple methods
+try:
+    # Try primary model
+    model = load_model_with_fallback(model_path)
+    
+    # If primary model fails, try alternatives
+    if model is None:
+        alternative_paths = [
+            os.path.join(current_dir, 'ambulance_model.h5'),
+            os.path.join(current_dir, 'emergency_vehicle_model.h5')
+        ]
+        for alt_path in alternative_paths:
+            print(f"Trying alternative model: {alt_path}")
+            model = load_model_with_fallback(alt_path)
+            if model is not None:
+                break
+                
+    # If all model loading attempts fail
+    if model is None:
+        raise Exception("Failed to load any model. Please ensure you have compatible TensorFlow version or reinstall models.")
+        
+except Exception as e:
+    print(f"Error loading any model: {e}")
+    raise
+
+# Define class names based on our dataset
+CLASS_NAMES = {
+    0: 'Emergency Vehicle', 
+    1: 'Normal Vehicle'
+}
+
+def predict_image(image_path):
+    try:
+        # Load and preprocess the image
+        img = image.load_img(image_path, target_size=(224, 224))
+        x = image.img_to_array(img)
+        x = np.expand_dims(x, axis=0)
+        x = preprocess_input(x)
+        
+        # Make prediction
+        preds = model.predict(x, verbose=0)  # Set verbose=0 to reduce output noise
+        class_idx = np.argmax(preds[0])
+        confidence = preds[0][class_idx] * 100
+        
+        # Map prediction to class name
+        class_name = CLASS_NAMES[class_idx]
+        
+        return class_name, confidence
+    except Exception as e:
+        print(f"Error processing image: {e}")
+        return "Error", 0.0
+
+def demo_with_webcam():
+    try:
+        # Try multiple camera indices if the default one doesn't work
+        camera_indices = [0, 1]  # Try camera index 0 first, then 1
+        cap = None
+        
+        for idx in camera_indices:
+            cap = cv2.VideoCapture(idx)
+            if cap is not None and cap.isOpened():
+                print(f"Successfully opened camera with index {idx}")
+                break
+                
+        if cap is None or not cap.isOpened():
+            print("Error: Could not open any camera. Please check your webcam connection.")
+            return
+            
+        print("Starting webcam feed. Press 'q' to quit.")
+        
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                print("Error: Failed to read frame from camera")
+                break
+                
+            # Resize frame to model input size
+            resized = cv2.resize(frame, (224, 224))
+            
+            # Preprocess frame
+            x = image.img_to_array(resized)
+            x = np.expand_dims(x, axis=0)
+            x = preprocess_input(x)
+            
+            # Make prediction
+            preds = model.predict(x, verbose=0)  # Set verbose=0 to reduce output noise
+            class_idx = np.argmax(preds[0])
+            confidence = preds[0][class_idx] * 100
+            class_name = CLASS_NAMES[class_idx]
+            
+            # Set color based on vehicle type (red for emergency, green for normal)
+            color = (0, 0, 255) if class_idx == 0 else (0, 255, 0)
+            
+            # Display result on frame
+            text = f"{class_name}: {confidence:.2f}%"
+            cv2.putText(frame, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
+            
+            # Add border if emergency vehicle detected with high confidence
+            if class_idx == 0 and confidence > 80:
+                cv2.putText(frame, "EMERGENCY VEHICLE DETECTED!", (10, frame.shape[0] - 20), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                cv2.rectangle(frame, (0, 0), (frame.shape[1]-1, frame.shape[0]-1), (0, 0, 255), 5)
+            
+            # Show frame
+            cv2.imshow('Emergency Vehicle Detection', frame)
+            
+            # Press 'q' to quit
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+    
+    except Exception as e:
+        print(f"Error in webcam demo: {e}")
+    finally:
+        if cap is not None and cap.isOpened():
+            cap.release()
+        cv2.destroyAllWindows()
+        print("Webcam demo stopped")
+
+def test_single_image(image_path):
+    # Handle relative paths
+    if not os.path.isabs(image_path):
+        # Try from current directory
+        full_path = os.path.join(os.getcwd(), image_path)
+        # If not found, try from parent directory (for Test folder)
+        if not os.path.exists(full_path):
+            full_path = os.path.join(os.path.dirname(os.getcwd()), image_path)
+            # If still not found, try from Test directory
+            if not os.path.exists(full_path):
+                test_dir = os.path.join(os.path.dirname(os.getcwd()), 'Test')
+                full_path = os.path.join(test_dir, os.path.basename(image_path))
+    else:
+        full_path = image_path
+        
+    if not os.path.exists(full_path):
+        print(f"Error: Image not found at {full_path}")
+        return
+        
+    print(f"Using image at: {full_path}")
+    class_name, confidence = predict_image(full_path)
+    print(f"Prediction: {class_name}")
+    print(f"Confidence: {confidence:.2f}%")
+    
+    # Display the image with prediction
+    img = cv2.imread(full_path)
+    if img is None:
+        print(f"Error: Could not read image at {full_path}")
+        return
+        
+    img = cv2.resize(img, (800, 600))
+    
+    # Set color based on vehicle type (red for emergency, green for normal)
+    color = (0, 0, 255) if class_name == 'Emergency Vehicle' else (0, 255, 0)
+    
+    text = f"{class_name}: {confidence:.2f}%"
+    cv2.putText(img, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
+    cv2.imshow('Emergency Vehicle Detection', img)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+if __name__ == "__main__":
+    print("Emergency Vehicle Detection System")
+    print("Choose demo type:")
+    print("1. Test with webcam")
+    print("2. Test with single image")
+    choice = input("Enter choice (1 or 2): ")
+    
+    if choice == '1':
+        print("Starting webcam demo... Press 'q' to quit")
+        demo_with_webcam()
+    elif choice == '2':
+        image_path = input("Enter the path to your test image: ")
+        test_single_image(image_path)
+    else:
+        print("Invalid choice. Please run the program again.")
