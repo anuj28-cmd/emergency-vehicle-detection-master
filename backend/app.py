@@ -218,6 +218,43 @@ def admin_required(f):
     return decorated
 
 # Routes
+@app.route('/')
+def index():
+    """Root route for the API"""
+    return jsonify({
+        "name": "Emergency Vehicle Detection API",
+        "version": "1.0.0",
+        "status": "running",
+        "endpoints": {
+            "health": "/api/health",
+            "register": "/api/register",
+            "login": "/api/login",
+            "detect": "/api/detect",
+            "history": "/api/history",
+            "statistics": "/api/statistics",
+            "settings": "/api/settings"
+        },
+        "database": "MongoDB Atlas",
+        "deployment": "Vercel",
+        "timestamp": datetime.now().isoformat()
+    })
+
+@app.route('/api')
+def api_info():
+    """API information endpoint"""
+    return jsonify({
+        "name": "Emergency Vehicle Detection API",
+        "version": "1.0.0",
+        "status": "online",
+        "features": [
+            "Emergency vehicle detection using AI",
+            "User authentication and management",
+            "Real-time image processing",
+            "Detection history and analytics",
+            "Admin dashboard and settings"
+        ]
+    })
+
 @app.route('/api/health', methods=['GET'])
 def health_check():
     return jsonify({

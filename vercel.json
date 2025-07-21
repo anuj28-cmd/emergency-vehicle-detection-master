@@ -1,0 +1,12 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "https://backend-ogmzhbrly-anuj-udapures-projects.vercel.app/api/$1"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "https://frontend-c4jcu97zc-anuj-udapures-projects.vercel.app/$1"
+    }
+  ]
+}
