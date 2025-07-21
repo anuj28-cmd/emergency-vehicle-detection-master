@@ -7,7 +7,7 @@ from datetime import datetime
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
-# import cv2  # Temporarily disabled for Vercel
+import cv2
 import numpy as np
 from PIL import Image
 import jwt
@@ -113,18 +113,32 @@ def analyze_image(image_path):
         # Create a mock bounding box for visualization purposes
         bbox = None
         if result:
-            # Read the image to get dimensions using PIL
-            try:
-                with Image.open(image_path) as img:
-                    w, h = img.size
-                    # Create a sample bounding box (this is just for visualization)
-                    bbox = [int(w*0.2), int(h*0.2), int(w*0.6), int(h*0.6)]  # [x, y, width, height]
-            except Exception as e:
+            # Read the image to get dimensions
+            img = cv2.imread(image_path)
+            if img is None:
                 return {"error": f"Failed to read image: {image_path}"}
+                
+            h, w = img.shape[:2]
+            # Create a sample bounding box (this is just for visualization)
+            bbox = [int(w*0.2), int(h*0.2), int(w*0.6), int(h*0.6)]  # [x, y, width, height]
         
-        # For now, skip the image processing with bounding boxes (requires OpenCV)
+        # Draw bounding box on image if detection is positive
         processed_filename = os.path.basename(image_path)
-        # TODO: Add back image processing with bounding boxes when OpenCV is available
+        if result and bbox:
+            try:
+                original_img = cv2.imread(image_path)
+                x, y, w, h = bbox
+                cv2.rectangle(original_img, (x, y), (x + w, y + h), (0, 0, 255), 2)
+                cv2.putText(original_img, f"{detected_class}: {confidence:.2f}%", 
+                           (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
+                
+                # Save the processed image
+                processed_filename = f"processed_{os.path.basename(image_path)}"
+                processed_path = os.path.join(app.config['UPLOAD_FOLDER'], processed_filename)
+                cv2.imwrite(processed_path, original_img)
+            except Exception as e:
+                print(f"Error processing image visualization: {e}")
+                # Continue with the original image if visualization fails
         
         return {
             "result": result,
