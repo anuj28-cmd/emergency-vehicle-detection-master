@@ -77,3 +77,4 @@ backend/uploads/*
 *.h5
 .env.production.local
 __pycache__
+.vercel
