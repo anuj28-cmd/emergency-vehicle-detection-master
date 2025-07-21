@@ -2,4 +2,5 @@
 from app import app
 
 # This is the entry point for Vercel
-# Note: Vercel handles the app.run() automatically
+# Export the app for Vercel's WSGI handler
+handler = app
